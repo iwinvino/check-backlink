@@ -75,7 +75,6 @@ HISTORY_SOURCES = {
     "archive.today (khi archive.org bị chặn)": "archive_today",
 }
 HISTORY_DEFAULT = ["Wayback Machine (archive.org)"]
-ARCHIVE_TODAY_MIRRORS = ["archive.today", "archive.ph", "archive.is", "archive.li", "archive.md"]
 
 TIMEOUT = 20
 MAX_HOPS = 10
@@ -226,33 +225,9 @@ def ua_probe(url: str, ua_pairs: list) -> str:
 
 
 def archive_today_history(url: str) -> str:
-    """Tra ban luu archive.today (archive.ph/is/li/md) — dung khi ISP chan archive.org.
-    archive.today luu noi dung trang (theo redirect khi luu) nen khong doc duoc header
-    301 goc nhu Wayback, nhung cho biet URL co ban luu + link mo tay de kiem tra."""
-    last = ""
-    for host in ARCHIVE_TODAY_MIRRORS:
-        try:
-            r = requests.get(
-                f"http://{host}/newest/{url}",
-                headers=HEADERS,
-                timeout=TIMEOUT,
-                allow_redirects=False,
-            )
-        except requests.exceptions.RequestException as e:
-            last = f"{host}: lỗi {type(e).__name__}"
-            continue
-        if r.status_code in (301, 302, 303, 307, 308):
-            snap = r.headers.get("Location") or ""
-            if snap and "/http" in snap:  # co ban luu -> Location tro toi snapshot
-                return f"có bản lưu (mới nhất): {snap}"
-            return f"có bản lưu — mở: http://{host}/{url}"
-        if r.status_code == 200:
-            return f"có trang lưu — mở: http://{host}/{url}"
-        if r.status_code in (429, 403):
-            last = f"{host}: bị chặn tạm (HTTP {r.status_code}) — mở tay: http://{host}/{url}"
-            continue
-        last = f"{host}: HTTP {r.status_code}"
-    return "archive.today " + (last or "không phản hồi") + " (thử lại sau hoặc mở link thủ công)"
+    """archive.today chan truy cap TU DONG (Cloudflare 429) nhung MO BANG TRINH DUYET thi
+    xem duoc. Nen KHONG scrape (tranh bao loi 429 vo ich) — dua thang link de user tu mo."""
+    return f"mở link để xem bản lưu → https://archive.today/newest/{url}"
 
 
 def redirect_history(url: str, sources: list) -> str:
@@ -268,9 +243,10 @@ def redirect_history(url: str, sources: list) -> str:
 
 
 def wayback_301_history(url: str, max_lookups: int = 4) -> str:
-    """Tra lich su redirect cua URL tren Wayback Machine (mien phi):
-    lay toi da `max_lookups` ban chup 3xx rai deu theo thoi gian, doc header
-    Location cua tung ban de biet URL nay TUNG tro 301 ve dau."""
+    """Best-effort doc header 301 cu tu Wayback (timeout NGAN de khong treo). Wayback chan
+    truy cap tu dong (IP cloud/ISP) nhung mo trinh duyet thi duoc — nen DU doc duoc hay khong,
+    LUON kem link mo tay de user tu xem."""
+    manual = f"https://web.archive.org/web/2*/{url}"
     try:
         r = requests.get(
             "https://web.archive.org/cdx/search/cdx",
@@ -281,19 +257,14 @@ def wayback_301_history(url: str, max_lookups: int = 4) -> str:
                 "filter": "statuscode:3..",
                 "collapse": "timestamp:6",  # toi da 1 ban chup / thang
             },
-            timeout=TIMEOUT,
+            timeout=(4, 8),  # connect 4s: chan/treo thi bo nhanh, khong doi 20s
         )
         data = r.json()
-    except requests.exceptions.RequestException:
-        return (
-            "⚠️ không vào được archive.org (nhiều ISP VN chặn đích danh) — hãy chọn thêm nguồn "
-            "'archive.today', hoặc dùng bản deploy web/VPN (server ngoài VN vào Wayback bình thường)"
-        )
-    except Exception:  # noqa: BLE001 — Wayback loi khac khong duoc pha luong chinh
-        return "không tra được Wayback"
+    except Exception:  # noqa: BLE001 — chan/treo/loi deu chuyen sang link mo tay
+        return f"tự mở xem lịch sử → {manual}"
     rows = data[1:] if isinstance(data, list) and len(data) > 1 else []
     if not rows:
-        return "Wayback không có bản chụp redirect (3xx)"
+        return f"Wayback chưa có bản chụp 3xx — tự kiểm tra: {manual}"
     if len(rows) > max_lookups:  # rai deu tu ban cu nhat den moi nhat
         idx = [round(i * (len(rows) - 1) / (max_lookups - 1)) for i in range(max_lookups)]
         rows = [rows[i] for i in dict.fromkeys(idx)]
@@ -302,7 +273,7 @@ def wayback_301_history(url: str, max_lookups: int = 4) -> str:
         try:
             s = requests.get(
                 f"https://web.archive.org/web/{ts}id_/{url}",
-                timeout=TIMEOUT,
+                timeout=(4, 8),
                 allow_redirects=False,
             )
             loc = s.headers.get("Location") or ""
@@ -312,7 +283,9 @@ def wayback_301_history(url: str, max_lookups: int = 4) -> str:
         if loc and loc not in seen:
             seen.add(loc)
             hist.append(f"{ts[:4]}-{ts[4:6]}: {status} → {loc}")
-    return " ;  ".join(hist) if hist else f"có {len(rows)} bản chụp 3xx nhưng không đọc được đích"
+    if hist:
+        return " ;  ".join(hist) + f"  (đầy đủ: {manual})"
+    return f"có {len(rows)} bản chụp 3xx — tự mở đọc đích: {manual}"
 
 
 def check_redirect(url: str, ua_pairs: list = None, history_sources: list = None) -> dict:
@@ -746,9 +719,9 @@ with tab_redirect:
     with st.expander("🕰️ Tra lịch sử redirect (đa nguồn, tùy chọn)"):
         st.caption(
             "Xem mỗi URL TỪNG trỏ 301 về đâu trong quá khứ (bắt redirect đã gỡ/đang giấu). "
-            "**Wayback** đọc được header 301 gốc (chuẩn nhất) nhưng nhiều ISP Việt Nam chặn archive.org — "
-            "khi đó chọn thêm **archive.today** (nguồn khác, vào được kể cả khi archive.org bị chặn). "
-            "Chạy bản deploy web thì Wayback hoạt động bình thường vì server đặt ngoài VN."
+            "Lưu ý: các kho lưu trữ (Wayback, archive.today) **chặn truy cập tự động** (giới hạn IP / Cloudflare) "
+            "nhưng **mở bằng trình duyệt thì xem được** — nên tool sẽ **đưa link bấm mở tay**, và cố đọc tự động khi được. "
+            "Không phải lỗi tool."
         )
         hist_sel = st.multiselect(
             "Nguồn tra lịch sử",
