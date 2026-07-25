@@ -608,12 +608,13 @@ if _app_pw and not st.session_state.get("auth_ok"):
             st.error("Sai mật khẩu.")
     st.stop()
 
-tab_backlink, tab_redirect, tab_api, tab_history = st.tabs(
+tab_backlink, tab_redirect, tab_api, tab_history, tab_settings = st.tabs(
     [
         "🔗 Check Backlink",
         "↪️ Check Redirect 301",
         "📊 Phân tích Backlink (API)",
         "📜 Lịch sử (24h)",
+        "⚙️ Cài đặt API",
     ]
 )
 
@@ -809,8 +810,7 @@ with tab_redirect:
         ))
     if not (_has_se or _has_dfs):
         st.warning(
-            "Chưa có key API nào. Mở tab '📊 Phân tích Backlink (API)' → '🔑 Cấu hình API' "
-            "nhập key rồi quay lại đây."
+            "Chưa có key API nào. Mở tab '⚙️ Cài đặt API' nhập key rồi quay lại đây."
         )
     origin_url_raw = st.text_input(
         "Domain đích (nơi các trang khác trỏ 301 về)",
@@ -852,7 +852,7 @@ with tab_redirect:
                     )
             except ProviderError as e:
                 st.error(
-                    f"{e}\n\nMở tab '📊 Phân tích Backlink (API)' → mục '🔑 Cấu hình API' để kiểm tra key."
+                    f"{e}\n\nMở tab '⚙️ Cài đặt API' để kiểm tra key."
                 )
 
     odf = st.session_state.get("origin_df")
@@ -885,78 +885,18 @@ with tab_redirect:
 with tab_api:
     st.subheader("Phân tích toàn bộ backlink của site bất kỳ (qua API)")
     cfg = load_config()  # cau hinh hieu luc (session + fallback key chung)
-    disp = config_for_display()  # gia tri hien len o nhap (khong lo key chung cho nguoi khac)
-    _multi = is_multi_user()
-    _owner_has = bool(_owner_config())
+    _has_key = bool(cfg.get("se_keys") or (cfg.get("dfs_login") and cfg.get("dfs_password")))
+    if not _has_key:
+        st.warning("⚠️ Chưa có key API. Mở tab **⚙️ Cài đặt API** (ngoài cùng bên phải) để nhập key rồi quay lại.")
 
-    if _multi:
-        st.info(
-            "🌐 **Chế độ nhiều người dùng**: key bạn nhập dưới đây chỉ lưu trong **phiên của bạn** "
-            "(không ghi lên server, không ai thấy key của bạn), mất khi đóng tab."
-            + (
-                " Nếu bạn để trống, hệ thống dùng **key chung của chủ web**."
-                if _owner_has else ""
-            )
-        )
-
-    _exp_title = (
-        "🔑 Cấu hình API (chỉ lưu trong phiên của bạn)" if _multi
-        else "🔑 Cấu hình API (lưu local trên máy bạn)"
+    _saved_prov = cfg.get("provider", "DataForSEO")
+    provider_name = st.radio(
+        "Nguồn dữ liệu cho lần phân tích này",
+        ["DataForSEO", "SE Ranking (xoay nhiều key)", "Gộp (SE Ranking + DataForSEO)"],
+        horizontal=True,
+        index=(0 if _saved_prov == "DataForSEO" else (1 if _saved_prov == "SE Ranking" else 2)),
+        help="Chọn 1 nguồn (rẻ hơn) hoặc Gộp cả 2 (phủ rộng nhất). Key nhập ở tab ⚙️ Cài đặt API.",
     )
-    with st.expander(_exp_title, expanded=not disp):
-        _prov_options = [
-            "DataForSEO",
-            "SE Ranking (xoay nhiều key)",
-            "Gộp (SE Ranking + DataForSEO)",
-        ]
-        _saved_prov = disp.get("provider", "DataForSEO")
-        provider_name = st.radio(
-            "Nguồn dữ liệu",
-            _prov_options,
-            horizontal=True,
-            index=(
-                0 if _saved_prov == "DataForSEO" else (1 if _saved_prov == "SE Ranking" else 2)
-            ),
-            help="Gộp = chạy cả 2 nguồn song song, cộng kết quả + loại trùng → độ phủ cao nhất (tốn phí cả 2 bên; thiếu key 1 bên thì tự chạy bên còn lại và báo warning).",
-        )
-        col_a, col_b = st.columns(2)
-        with col_a:
-            dfs_login = st.text_input(
-                "DataForSEO API Login", value=disp.get("dfs_login", "")
-            )
-        with col_b:
-            dfs_password = st.text_input(
-                "DataForSEO API Password",
-                value=disp.get("dfs_password", ""),
-                type="password",
-            )
-        se_keys_text = st.text_area(
-            "SE Ranking API key (mỗi dòng 1 key — key hết credit sẽ TỰ ĐỘNG chuyển sang key kế tiếp)",
-            value="\n".join(disp.get("se_keys", [])),
-            height=110,
-            placeholder="key-thu-nhat\nkey-thu-hai\n...",
-        )
-        _save_label = "💾 Dùng cho phiên này" if _multi else "💾 Lưu cấu hình"
-        if st.button(_save_label, use_container_width=True):
-            save_config(
-                {
-                    "provider": (
-                        "DataForSEO"
-                        if provider_name == "DataForSEO"
-                        else ("SE Ranking" if provider_name.startswith("SE Ranking") else "Gộp")
-                    ),
-                    "dfs_login": dfs_login.strip(),
-                    "dfs_password": dfs_password.strip(),
-                    "se_keys": [
-                        k.strip() for k in se_keys_text.splitlines() if k.strip()
-                    ],
-                }
-            )
-            st.success(
-                "Đã lưu cho phiên của bạn (không ghi lên server)." if _multi
-                else "Đã lưu vào config.json (chỉ nằm trên máy bạn)."
-            )
-            st.rerun()
 
     target_api = st.text_input(
         "Domain / URL cần phân tích",
@@ -1027,15 +967,12 @@ with tab_api:
         else:
             provider = None
             try:
-                # o nhap trong (mo hinh B: user khong nhap) -> fallback key chung tu load_config()
-                _eff = load_config()
-                _run_login = dfs_login.strip() or _eff.get("dfs_login", "")
-                _run_pass = dfs_password.strip() or _eff.get("dfs_password", "")
-                _run_se = [
-                    k.strip() for k in se_keys_text.splitlines() if k.strip()
-                ] or _eff.get("se_keys", [])
+                # key lay tu cau hinh da luu (tab Cai dat)
                 provider = build_provider(
-                    provider_name, _run_login, _run_pass, _run_se
+                    provider_name,
+                    cfg.get("dfs_login", ""),
+                    cfg.get("dfs_password", ""),
+                    cfg.get("se_keys", []),
                 )
                 warnings = []
                 target_domain = normalize_domain(tgt)
@@ -1244,3 +1181,69 @@ with tab_history:
         if st.button("🗑️ Xóa toàn bộ lịch sử", use_container_width=True):
             clear_history()
             st.rerun()
+
+# ---------- TAB 5: CAI DAT API ----------
+with tab_settings:
+    st.subheader("⚙️ Cài đặt API")
+    st.caption("Nhập key API ở đây một lần. Các tab Phân tích Backlink và Tìm domain 301 sẽ tự dùng.")
+    _disp = config_for_display()  # gia tri hien len o nhap (khong lo key chung cho nguoi khac)
+    _multi = is_multi_user()
+    _owner_has = bool(_owner_config())
+
+    if _multi:
+        st.info(
+            "🌐 **Chế độ nhiều người dùng**: key bạn nhập chỉ lưu trong **phiên của bạn** "
+            "(không ghi lên server, không ai thấy key của bạn), mất khi đóng tab."
+            + (" Để trống thì dùng **key chung của chủ web**." if _owner_has else "")
+        )
+    elif _owner_has:
+        st.success("✅ Hệ thống đã có **key chung** — bạn có thể dùng ngay, không cần nhập. Nhập bên dưới nếu muốn dùng key riêng.")
+
+    _prov_options = [
+        "DataForSEO",
+        "SE Ranking (xoay nhiều key)",
+        "Gộp (SE Ranking + DataForSEO)",
+    ]
+    _saved_prov = _disp.get("provider", "DataForSEO")
+    set_provider = st.radio(
+        "Nguồn dữ liệu mặc định",
+        _prov_options,
+        horizontal=True,
+        index=(0 if _saved_prov == "DataForSEO" else (1 if _saved_prov == "SE Ranking" else 2)),
+        help="Nguồn mặc định khi mở tab phân tích (vẫn đổi được ở từng lần chạy). Gộp = chạy cả 2 nguồn, phủ rộng nhất.",
+    )
+    st.markdown("**DataForSEO**")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        set_dfs_login = st.text_input("API Login", value=_disp.get("dfs_login", ""), key="set_dfs_login")
+    with col_b:
+        set_dfs_password = st.text_input(
+            "API Password", value=_disp.get("dfs_password", ""), type="password", key="set_dfs_password"
+        )
+    st.markdown("**SE Ranking**")
+    set_se_keys = st.text_area(
+        "API key (mỗi dòng 1 key — hết credit sẽ TỰ ĐỘNG chuyển key kế tiếp)",
+        value="\n".join(_disp.get("se_keys", [])),
+        height=110,
+        placeholder="key-thu-nhat\nkey-thu-hai\n...",
+        key="set_se_keys",
+    )
+    _save_label = "💾 Dùng cho phiên này" if _multi else "💾 Lưu cấu hình"
+    if st.button(_save_label, type="primary", use_container_width=True):
+        save_config(
+            {
+                "provider": (
+                    "DataForSEO"
+                    if set_provider == "DataForSEO"
+                    else ("SE Ranking" if set_provider.startswith("SE Ranking") else "Gộp")
+                ),
+                "dfs_login": set_dfs_login.strip(),
+                "dfs_password": set_dfs_password.strip(),
+                "se_keys": [k.strip() for k in set_se_keys.splitlines() if k.strip()],
+            }
+        )
+        st.success(
+            "Đã lưu cho phiên của bạn (không ghi lên server)." if _multi
+            else "Đã lưu cấu hình."
+        )
+        st.rerun()
