@@ -19,9 +19,26 @@ from urllib.parse import urljoin, urlparse
 import pandas as pd
 import requests
 import streamlit as st
+import urllib3
 from bs4 import BeautifulSoup
 
 from providers import ProviderError, build_provider
+
+# tool trace redirect: nhieu site nguon co chung chi SSL loi (het han/self-signed) nhung van
+# redirect. Cho phep retry khong verify de van trace duoc; tat canh bao rac cua urllib3.
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+def safe_get(url: str, insecure_flag: list = None, **kw):
+    """GET; neu loi CHUNG CHI SSL thi thu lai voi verify=False (van trace duoc site loi cert).
+    insecure_flag: neu truyen list, append True khi da phai bo qua SSL."""
+    try:
+        return requests.get(url, **kw)
+    except requests.exceptions.SSLError:
+        if insecure_flag is not None:
+            insecure_flag.append(True)
+        kw["verify"] = False
+        return requests.get(url, **kw)
 
 CONFIG_FILE = Path(__file__).with_name("config.json")
 HISTORY_DB = Path(__file__).with_name("history.db")
@@ -115,7 +132,7 @@ def check_backlink(url: str, target: str) -> dict:
         "Lỗi": "",
     }
     try:
-        r = requests.get(url, headers=HEADERS, timeout=TIMEOUT, allow_redirects=True)
+        r = safe_get(url, headers=HEADERS, timeout=TIMEOUT, allow_redirects=True)
         row["HTTP Status"] = r.status_code
         if r.status_code >= 400:
             row["Còn link?"] = "❌ Trang lỗi"
@@ -191,7 +208,7 @@ def ua_probe(url: str, ua_pairs: list) -> str:
     probes = []
     for label, ua in ua_pairs:
         try:
-            r = requests.get(
+            r = safe_get(
                 url,
                 headers={**HEADERS, "User-Agent": ua},
                 timeout=TIMEOUT,
@@ -321,10 +338,12 @@ def check_redirect(url: str, ua_pairs: list = None, history_sources: list = None
     chain = []
     current = url
     final_resp = None
+    _insecure = []  # danh dau neu phai bo qua loi SSL de trace duoc
     try:
         for _ in range(MAX_HOPS):
-            r = requests.get(
-                current, headers=HEADERS, timeout=TIMEOUT, allow_redirects=False
+            r = safe_get(
+                current, insecure_flag=_insecure,
+                headers=HEADERS, timeout=TIMEOUT, allow_redirects=False,
             )
             chain.append((current, r.status_code))
             if r.status_code in REDIRECT_CODES:
