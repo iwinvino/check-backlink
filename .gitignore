@@ -1,0 +1,9 @@
+# TUYET DOI khong commit key API va du lieu ca nhan
+config.json
+history.db
+.streamlit/secrets.toml
+
+__pycache__/
+*.pyc
+.venv/
+venv/
