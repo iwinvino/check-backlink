@@ -793,18 +793,22 @@ with tab_redirect:
     _cfg_r = load_config()
     _has_se = bool(_cfg_r.get("se_keys"))
     _has_dfs = bool(_cfg_r.get("dfs_login") and _cfg_r.get("dfs_password"))
-    _src_opts = ["Gộp (tất cả nguồn đã cấu hình)"]
-    if _has_se:
-        _src_opts.append("SE Ranking")
-    if _has_dfs:
-        _src_opts.append("DataForSEO")
+    # liet ke ro 3 lua chon giong tab Phan tich Backlink — chon 1 nguon hoac Gop tuy y
+    _src_opts = [
+        "DataForSEO",
+        "SE Ranking (xoay nhiều key)",
+        "Gộp (SE Ranking + DataForSEO)",
+    ]
+    _saved_prov_r = _cfg_r.get("provider", "DataForSEO")
+    _src_idx = 0 if _saved_prov_r == "DataForSEO" else (1 if _saved_prov_r == "SE Ranking" else 2)
     colr1, colr2 = st.columns([2, 1])
     with colr1:
         origin_src = st.radio(
             "Nguồn dữ liệu",
             _src_opts,
+            index=_src_idx,
             horizontal=True,
-            help="Gộp = chạy song song mọi nguồn bạn đã nhập key ở tab '📊 Phân tích Backlink (API)' rồi cộng kết quả + loại trùng. Chưa có key nguồn nào thì vào tab đó nhập trước.",
+            help="Chọn 1 nguồn (rẻ hơn, chỉ tốn credit 1 bên) hoặc Gộp cả 2 (phủ rộng nhất, tốn credit cả 2 bên). Key lấy từ tab '📊 Phân tích Backlink (API)'.",
         )
     with colr2:
         origin_limit = int(st.number_input(
@@ -814,7 +818,7 @@ with tab_redirect:
     if not (_has_se or _has_dfs):
         st.warning(
             "Chưa có key API nào. Mở tab '📊 Phân tích Backlink (API)' → '🔑 Cấu hình API' "
-            "nhập key (nên nhập CẢ SE Ranking và DataForSEO để phủ rộng nhất) rồi quay lại đây."
+            "nhập key rồi quay lại đây."
         )
     origin_url_raw = st.text_input(
         "Domain đích (nơi các trang khác trỏ 301 về)",
@@ -827,8 +831,8 @@ with tab_redirect:
             st.error("Vui lòng nhập domain đích.")
         else:
             _prov_arg = (
-                "Gộp" if origin_src.startswith("Gộp")
-                else ("SE Ranking" if origin_src == "SE Ranking" else "DataForSEO")
+                "DataForSEO" if origin_src == "DataForSEO"
+                else ("SE Ranking" if origin_src.startswith("SE Ranking") else "Gộp")
             )
             try:
                 provider2 = build_provider(
@@ -1031,11 +1035,15 @@ with tab_api:
         else:
             provider = None
             try:
+                # o nhap trong (mo hinh B: user khong nhap) -> fallback key chung tu load_config()
+                _eff = load_config()
+                _run_login = dfs_login.strip() or _eff.get("dfs_login", "")
+                _run_pass = dfs_password.strip() or _eff.get("dfs_password", "")
+                _run_se = [
+                    k.strip() for k in se_keys_text.splitlines() if k.strip()
+                ] or _eff.get("se_keys", [])
                 provider = build_provider(
-                    provider_name,
-                    dfs_login.strip(),
-                    dfs_password.strip(),
-                    [k.strip() for k in se_keys_text.splitlines() if k.strip()],
+                    provider_name, _run_login, _run_pass, _run_se
                 )
                 warnings = []
                 target_domain = normalize_domain(tgt)
